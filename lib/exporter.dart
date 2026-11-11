@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide TextSpan;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'parser.dart';
