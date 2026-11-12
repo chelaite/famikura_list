@@ -30,6 +30,15 @@ jobs:
             sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.debug\n            minifyEnabled false\n            shrinkResources false/' android/app/build.gradle
             grep -n -A6 "release {" android/app/build.gradle
           fi
+      - name: Add ML Kit Japanese model dependency
+        run: |
+          if [ -f android/app/build.gradle.kts ]; then
+            printf '\ndependencies {\n    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")\n}\n' >> android/app/build.gradle.kts
+            tail -5 android/app/build.gradle.kts
+          else
+            printf "\ndependencies {\n    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'\n}\n" >> android/app/build.gradle
+            tail -5 android/app/build.gradle
+          fi
       - run: flutter pub get
       - run: flutter build apk --release --no-shrink
       - uses: actions/upload-artifact@v4
