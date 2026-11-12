@@ -21,9 +21,19 @@ jobs:
         run: |
           flutter create --platforms=android --project-name famikura_list --org com.example .
           rm -rf test
+      - name: Disable R8 minify (ML Kit missing-class fix)
+        run: |
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false\n            isShrinkResources = false/' android/app/build.gradle.kts
+            grep -n -A6 "release {" android/app/build.gradle.kts
+          else
+            sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.debug\n            minifyEnabled false\n            shrinkResources false/' android/app/build.gradle
+            grep -n -A6 "release {" android/app/build.gradle
+          fi
       - run: flutter pub get
       - run: flutter build apk --release --no-shrink
       - uses: actions/upload-artifact@v4
         with:
           name: famikura-list-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
