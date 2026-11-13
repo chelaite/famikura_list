@@ -6,8 +6,14 @@ import 'exporter.dart';
 import 'import_flow.dart';
 import 'parser.dart';
 import 'store.dart';
+import 'catalog.dart';
+import 'shop_page.dart';
 
-void main() => runApp(const App());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await catalog.load();
+  runApp(const App());
+}
 
 int _cq(int v) => v < 1 ? 1 : (v > 99 ? 99 : v);
 
@@ -64,6 +70,24 @@ class _ListsPageState extends State<ListsPage> {
       MaterialPageRoute(builder: (_) => ListPage(list: l, onChanged: _save, initialNotes: notes)),
     );
     if (mounted) setState(() {});
+  }
+
+  Future<void> _openShop() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ShopPage(onCreate: _createFromShop)),
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 商店购物车 → 新清单，然后回到总览并打开这个清单
+  Future<void> _createFromShop(String name, List<Item> items) async {
+    final l = ShopList(id: ShopList.newId(), name: name, created: DateTime.now(), items: items);
+    setState(() => _lists.insert(0, l));
+    await _save();
+    if (!mounted) return;
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    await _open(l);
   }
 
   Future<void> _create() async {
@@ -156,6 +180,11 @@ class _ListsPageState extends State<ListsPage> {
           : AppBar(
               title: const Text('我的列表'),
               actions: [
+                IconButton(
+                  tooltip: '商品库',
+                  icon: const Icon(Icons.storefront),
+                  onPressed: _busy ? null : _openShop,
+                ),
                 IconButton(
                   tooltip: '新建列表',
                   icon: const Icon(Icons.add),
@@ -420,6 +449,16 @@ class _ListPageState extends State<ListPage> {
         ),
       ]);
 
+  /// 商品库里有这件商品时，在左侧显示缩略图，点击看大图
+  Widget? _thumb(Item it) {
+    final p = it.hasCode ? catalog.findByNo(it.code) : null;
+    if (p == null) return null;
+    return GestureDetector(
+      onTap: () => showProductDialog(context, p, showAdd: false),
+      child: ProductImage(url: p.img, width: 36, height: 48, fit: BoxFit.cover),
+    );
+  }
+
   Widget _tile(Item it) => Dismissible(
         key: ObjectKey(it),
         direction: DismissDirection.endToStart,
@@ -434,6 +473,7 @@ class _ListPageState extends State<ListPage> {
           margin: const EdgeInsets.symmetric(vertical: 2),
           child: ListTile(
             dense: true,
+            leading: _thumb(it),
             title: Text(it.hasCode ? it.code : it.name),
             subtitle: it.hasCode && it.name.isNotEmpty ? Text(it.name) : null,
             onTap: () => _edit(it),

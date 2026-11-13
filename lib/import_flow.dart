@@ -1,4 +1,5 @@
 import 'package:image_picker/image_picker.dart';
+import 'catalog.dart';
 import 'ocr_service.dart';
 import 'parser.dart';
 
@@ -25,7 +26,7 @@ Future<List<String>?> importScreenshots(
         }
         final ex = target.where((e) => e.key == it.key).toList();
         if (ex.isEmpty) {
-          target.add(it);
+          target.add(catalog.enrich(it));
         } else if (it.hasCode && !it.qtyGuess && ex.first.qty != it.qty) {
           notes.add('$tag：${it.code} 与之前的截图重复且数量不同（已有 ${ex.first.qty}，这张 ${it.qty}），保留已有数量，请自行核对');
         }
