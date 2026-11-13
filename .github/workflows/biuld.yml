@@ -39,6 +39,13 @@ jobs:
             printf "\ndependencies {\n    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'\n}\n" >> android/app/build.gradle
             tail -5 android/app/build.gradle
           fi
+      - name: Add INTERNET permission
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.INTERNET" "$M"; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
+          fi
+          grep -n "permission\|<application" "$M"
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release --no-shrink
@@ -46,4 +53,6 @@ jobs:
         with:
           name: famikura-list-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+
 
