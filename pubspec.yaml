@@ -18,3 +18,10 @@ dependencies:
 
 flutter:
   uses-material-design: true
+
+dev_dependencies:
+  flutter_launcher_icons: "^0.14.4" # 请根据最新版本调整，或者直接用最新版
+
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png" # 你的图标源文件路径
+  android: true
