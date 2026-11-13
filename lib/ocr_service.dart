@@ -9,6 +9,8 @@ import 'parser.dart';
 /// 若装了新 APK 仍然闪退，把 true 改成 false（只识别英文数字，编号照样能提取）
 const bool kUseJapanese = true;
 
+const int _tileH = 1600, _overlap = 300;
+
 class _SliceReq {
   final String path, dir;
   final int tileH, overlap;
@@ -46,19 +48,25 @@ Future<CartResult> recognizeCart(String path, {void Function(double)? onProgress
     script: kUseJapanese ? TextRecognitionScript.japanese : TextRecognitionScript.latin,
   );
   try {
-    final s = await compute(_slice, _SliceReq(path, dir.path, 1600, 300));
+    final s = await compute(_slice, _SliceReq(path, dir.path, _tileH, _overlap));
     final all = <OcrLine>[];
-    for (var i = 0; i < s.paths.length; i++) {
+    final n = s.paths.length;
+    for (var i = 0; i < n; i++) {
+      // 每个切片只"负责"自己的区间（重叠区在中线分界），避免同一行被两个切片各识别一次
+      final lo = i == 0 ? double.negativeInfinity : s.tops[i] + _overlap / 2;
+      final hi = i == n - 1 ? double.infinity : s.tops[i + 1] + _overlap / 2;
       final res = await recognizer.processImage(InputImage.fromFilePath(s.paths[i]));
       for (final block in res.blocks) {
         for (final line in block.lines) {
           final b = line.boundingBox;
-          all.add(OcrLine(line.text, s.tops[i] + b.center.dy, b.left / s.width, b.center.dx / s.width));
+          final y = s.tops[i] + b.center.dy;
+          if (y < lo || y >= hi) continue;
+          all.add(OcrLine(line.text, y, b.left / s.width, b.center.dx / s.width));
         }
       }
-      onProgress?.call((i + 1) / s.paths.length);
+      onProgress?.call((i + 1) / n);
     }
-    return parseCart(all);
+    return parseCart(all, imageWidth: s.width.toDouble());
   } finally {
     await recognizer.close();
     try {

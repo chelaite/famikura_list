@@ -180,6 +180,8 @@ List<Item> _itemsFrom(List<OcrLine> buf) {
   final qty = q ?? 1;
   final guess = q == null || ms.length > 1;
   if (ms.isEmpty) {
+    // 既没有编号、也没有名称、也没有数量框：是多余的分隔标记，丢弃
+    if (name.isEmpty && q == null) return [];
     return [Item(name: name.isEmpty ? '（未识别商品）' : name, qty: qty, qtyGuess: guess)];
   }
   return ms
@@ -187,8 +189,31 @@ List<Item> _itemsFrom(List<OcrLine> buf) {
       .toList();
 }
 
-/// 把 OCR 得到的所有行（来自重叠切片）合并为商品列表
-CartResult parseCart(List<OcrLine> raw) {
+/// 底部"商品合計数量：22 点"。标签和数字可能被拆成两行，顺序也可能颠倒，所以多种方式找
+int? _findTotal(List<OcrLine> footer, double w) {
+  final ts = footer.map((l) => normalizeForId(l.text)).toList();
+  for (final t in ts) {
+    final m = RegExp(r'数量\D{0,6}(\d{1,4})').firstMatch(t);
+    if (m != null) return int.tryParse(m.group(1)!);
+  }
+  for (final t in ts) {
+    if (t.contains('¥') || t.contains('金額')) continue;
+    final m = RegExp(r'(\d{1,4})\s*点').firstMatch(t);
+    if (m != null) return int.tryParse(m.group(1)!);
+  }
+  for (final l in footer) {
+    if (!normalizeForId(l.text).contains('数量')) continue;
+    for (final o in footer) {
+      if ((o.y - l.y).abs() > w * 0.05) continue;
+      final m = RegExp(r'^\D{0,2}(\d{1,4})\D{0,2}$').firstMatch(normalizeForId(o.text).trim());
+      if (m != null) return int.tryParse(m.group(1)!);
+    }
+  }
+  return null;
+}
+
+/// 把 OCR 得到的所有行合并为商品列表。imageWidth 用来判断两个"削除"标记是不是同一个
+CartResult parseCart(List<OcrLine> raw, {double imageWidth = 1080}) {
   final sorted = [...raw]..sort((a, b) => a.y.compareTo(b.y));
   final lines = <OcrLine>[];
   for (final l in sorted) {
@@ -208,8 +233,12 @@ CartResult parseCart(List<OcrLine> raw) {
 
   final items = <Item>[];
   var buf = <OcrLine>[];
+  double? lastMarkerY;
   for (final l in lines) {
     if (l.text.contains('削除')) {
+      // 两个标记离得太近（不到图宽的 20%）说明是同一个被重复识别，忽略
+      if (lastMarkerY != null && l.y - lastMarkerY < imageWidth * 0.2) continue;
+      lastMarkerY = l.y;
       items.addAll(_itemsFrom(buf));
       buf = [];
     } else {
@@ -222,9 +251,25 @@ CartResult parseCart(List<OcrLine> raw) {
     final found = _idRe.allMatches(all).map((m) => _fromMatch(m, '', 1, true)).toList();
     return CartResult(found, null);
   }
-  final footer = normalizeForId(buf.map((e) => e.text).join(' '));
-  final m = RegExp(r'合計数量\D{0,6}(\d+)').firstMatch(footer);
-  return CartResult(items, m == null ? null : int.tryParse(m.group(1)!));
+  final expected = _findTotal(buf, imageWidth);
+  final res = CartResult(items, expected);
+  if (expected != null) {
+    // 用合计数量校验：数量没识别到的商品按 1 计，合计刚好吻合就视为已核对；
+    // 只差一件没识别到数量的商品时，差额就是它的数量
+    final guessed = items.where((e) => e.qtyGuess).toList();
+    final d = expected - res.sumQty;
+    if (guessed.isNotEmpty) {
+      if (d == 0) {
+        for (final g in guessed) {
+          g.qtyGuess = false;
+        }
+      } else if (d > 0 && guessed.length == 1) {
+        guessed.first.qty += d;
+        guessed.first.qtyGuess = false;
+      }
+    }
+  }
+  return res;
 }
 
 /// 按团体分组，组内按 系列→序号 排序
