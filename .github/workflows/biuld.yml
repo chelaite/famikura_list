@@ -40,6 +40,7 @@ jobs:
             tail -5 android/app/build.gradle
           fi
       - run: flutter pub get
+      - run: dart run flutter_launcher_icons
       - run: flutter build apk --release --no-shrink
       - uses: actions/upload-artifact@v4
         with:
