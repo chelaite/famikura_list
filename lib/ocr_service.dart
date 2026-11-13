@@ -6,6 +6,9 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'parser.dart';
 
+/// 若装了新 APK 仍然闪退，把 true 改成 false（只识别英文数字，编号照样能提取）
+const bool kUseJapanese = true;
+
 class _SliceReq {
   final String path, dir;
   final int tileH, overlap;
@@ -39,7 +42,9 @@ _SliceRes _slice(_SliceReq r) {
 Future<CartResult> recognizeCart(String path, {void Function(double)? onProgress}) async {
   final tmp = await getTemporaryDirectory();
   final dir = await tmp.createTemp('ocr_');
-  final recognizer = TextRecognizer(script: TextRecognitionScript.japanese);
+  final recognizer = TextRecognizer(
+    script: kUseJapanese ? TextRecognitionScript.japanese : TextRecognitionScript.latin,
+  );
   try {
     final s = await compute(_slice, _SliceReq(path, dir.path, 1600, 300));
     final all = <OcrLine>[];
@@ -48,7 +53,7 @@ Future<CartResult> recognizeCart(String path, {void Function(double)? onProgress
       for (final block in res.blocks) {
         for (final line in block.lines) {
           final b = line.boundingBox;
-          all.add(OcrLine(line.text, s.tops[i] + b.center.dy, b.left / s.width));
+          all.add(OcrLine(line.text, s.tops[i] + b.center.dy, b.left / s.width, b.center.dx / s.width));
         }
       }
       onProgress?.call((i + 1) / s.paths.length);
