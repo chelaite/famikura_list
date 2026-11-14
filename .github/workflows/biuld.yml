@@ -46,13 +46,19 @@ jobs:
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
           fi
           grep -n "permission\|<application" "$M"
+      - name: Set app name
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:label="[^"]*"#android:label="Famikura List"#' "$M"
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release --no-shrink
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk Famikura-List.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: famikura-list-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Famikura-List-apk
+          path: Famikura-List.apk
 
 
 
