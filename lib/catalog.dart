@@ -22,13 +22,22 @@ String? _extractNo(String name) {
   return 'No.${m.group(1)!.toUpperCase()}${m.group(2)}-${m.group(3)}';
 }
 
+Set<String> _readTags(Map<String, dynamic> j) {
+  final out = <String>{};
+  final g = j['g'];
+  if (g is List) out.addAll(g.map((e) => e.toString()));
+  final t = (j['t'] ?? '').toString(); // 旧版本只存了同步用的团体名
+  if (t.isNotEmpty) out.add(t);
+  return out;
+}
+
 class Product {
   final String code; // 网站内部代码 SSXJ-90996
   final String name; // 完整商品名（含 【No.xxx】）
   final String cat; // photo / goods ...
   final String img;
   final String url; // 详情页路径
-  final String tag; // 同步时用的团体名
+  final Set<String> tags; // 话题标签（同步 / 联网搜索时记录）
   final int price;
   final String? no; // No.HSJ26-435
   final bool soldOut;
@@ -39,13 +48,25 @@ class Product {
     required this.cat,
     required this.img,
     required this.url,
-    required this.tag,
     required this.price,
     required this.no,
     required this.soldOut,
-  });
+    Set<String>? tags,
+  }) : tags = tags ?? <String>{};
 
-  late final String search = toHalfWidth('$name ${no ?? ''}').toLowerCase();
+  String? _search;
+
+  /// 本地搜索用的文字：商品名 + 编号 + 所有标签
+  String get search =>
+      _search ??= toHalfWidth('$name ${no ?? ''} ${tags.join(' ')}').toLowerCase();
+
+  bool addTag(String t) {
+    final v = t.trim();
+    if (v.isEmpty) return false;
+    final added = tags.add(v);
+    if (added) _search = null;
+    return added;
+  }
 
   /// 去掉开头的【No.xxx】
   String get displayName => name.replaceFirst(RegExp(r'^【[^】]*】\s*'), '');
@@ -53,7 +74,7 @@ class Product {
   /// 内部代码里的数字，越大越新
   int get seq => int.tryParse(code.split('-').last) ?? 0;
 
-  factory Product.fromApi(Map<String, dynamic> j, String tag) {
+  factory Product.fromApi(Map<String, dynamic> j) {
     String s(String k) => (j[k] ?? '').toString();
     final name = s('item_name');
     return Product(
@@ -62,7 +83,6 @@ class Product {
       cat: s('item_category_code'),
       img: s('item_img_url'),
       url: s('item_detail_url'),
-      tag: tag,
       price: int.tryParse(s('min_price')) ?? 0,
       no: _extractNo(name),
       soldOut: s('out_of_stock_code').isNotEmpty,
@@ -75,7 +95,7 @@ class Product {
         'k': cat,
         'i': img,
         'u': url,
-        't': tag,
+        'g': tags.toList(),
         'p': price,
         's': soldOut,
       };
@@ -88,12 +108,18 @@ class Product {
       cat: (j['k'] ?? '').toString(),
       img: (j['i'] ?? '').toString(),
       url: (j['u'] ?? '').toString(),
-      tag: (j['t'] ?? '').toString(),
+      tags: _readTags(j),
       price: (j['p'] as int?) ?? 0,
       no: _extractNo(name),
       soldOut: (j['s'] as bool?) ?? false,
     );
   }
+}
+
+class Artist {
+  final String name;
+  final List<String> members;
+  Artist(this.name, this.members);
 }
 
 class _PageResult {
@@ -120,14 +146,14 @@ Future<Map<String, dynamic>> _getJson(Uri uri) async {
   }
 }
 
-Future<_PageResult> _fetchPage(String ct, String tag, int page) async {
+Future<_PageResult> _fetchPage(String ct, int page, {String tag = '', String word = ''}) async {
   final uri = Uri.https(kHost, '/s/j/api_common/list/item_list_v3', {
     'rw': '60',
     'page': '$page',
     'ct': ct,
     'gr': '',
     'so': 'DATE',
-    'word': '',
+    'word': word,
     'hashtag': tag,
     'ignore': '',
     'label': '',
@@ -140,7 +166,7 @@ Future<_PageResult> _fetchPage(String ct, String tag, int page) async {
   final count = int.tryParse('${map['count']}') ?? 0;
   final list = (map['list'] as List?) ?? [];
   final items = list
-      .map((e) => Product.fromApi(Map<String, dynamic>.from(e as Map), tag))
+      .map((e) => Product.fromApi(Map<String, dynamic>.from(e as Map)))
       .where((p) => p.code.isNotEmpty)
       .toList();
   return _PageResult(count, total, items);
@@ -150,7 +176,7 @@ Future<_PageResult> _fetchPage(String ct, String tag, int page) async {
 class Catalog extends ChangeNotifier {
   final Map<String, Product> products = {};
   final Map<String, Product> _byNo = {};
-  List<String> tags = ['Hey! Say! JUMP'];
+  List<String> tags = [];
   DateTime? lastSync;
   bool syncing = false;
   String status = '';
@@ -199,21 +225,33 @@ class Catalog extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// 网站上所有团体/艺人的名字（用作话题标签）
-  Future<List<String>> fetchArtistNames() async {
+  /// 网站上所有团体和个人（团体带成员名单）。名字同时就是话题标签
+  Future<List<Artist>> fetchArtists() async {
     final uri = Uri.https(kHost, '/s/j/api/list/arti_list_with_actor', {'OPDATE': '', 'OPSTAT': ''});
     final map = await _getJson(uri);
     final list = (map['list'] as List?) ?? [];
-    return list
-        .map((e) => ((e as Map)['name'] ?? '').toString())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final out = <Artist>[];
+    for (final e in list) {
+      final m = e as Map;
+      final name = (m['name'] ?? '').toString();
+      if (name.isEmpty) continue;
+      final members = <String>[];
+      final pl = m['player'];
+      if (pl is List) {
+        for (final x in pl) {
+          final n = ((x as Map)['name'] ?? '').toString();
+          if (n.isNotEmpty && n != name && !members.contains(n)) members.add(n);
+        }
+      }
+      out.add(Artist(name, members));
+    }
+    return out;
   }
 
   void cancelSync() => _cancel = true;
 
   /// 按"团体 × 类别"逐页拉取，请求之间间隔 1.2 秒
-  Future<void> sync() async {
+  Future<void> sync(List<String> list) async {
     if (syncing) return;
     syncing = true;
     _cancel = false;
@@ -223,7 +261,7 @@ class Catalog extends ChangeNotifier {
     var cancelled = false;
     try {
       outer:
-      for (final tag in tags) {
+      for (final tag in list) {
         for (final ct in kCategories.keys) {
           var page = 0;
           var total = 1;
@@ -232,11 +270,17 @@ class Catalog extends ChangeNotifier {
               cancelled = true;
               break outer;
             }
-            final r = await _fetchPage(ct, tag, page);
+            final r = await _fetchPage(ct, page, tag: tag);
             total = r.pages;
             for (final p in r.items) {
-              if (!products.containsKey(p.code)) added++;
-              products[p.code] = p;
+              final ex = products[p.code];
+              if (ex == null) {
+                added++;
+                products[p.code] = p;
+                p.addTag(tag);
+              } else {
+                ex.addTag(tag);
+              }
             }
             status = '$tag · ${kCategories[ct]} ${page + 1}/${total < 1 ? 1 : total}（该类别共 ${r.count} 件）';
             notifyListeners();
@@ -246,6 +290,7 @@ class Catalog extends ChangeNotifier {
         }
       }
       if (!cancelled) lastSync = DateTime.now();
+      tags = <String>{...tags, ...list}.toList();
       status = cancelled
           ? '已取消（已保存已拉取的，商品库共 ${products.length} 件）'
           : '同步完成：新增 $added 件，商品库共 ${products.length} 件';
@@ -257,6 +302,56 @@ class Catalog extends ChangeNotifier {
       await _save();
       notifyListeners();
     }
+  }
+
+  /// 联网搜索：用网站自己的关键词搜索（会匹配商品名和标签），结果并入商品库，
+  /// 并给结果记上这个搜索词作为标签，以后在本地也能搜到
+  Future<int> searchOnline(String q, String cat) async {
+    final term = q.trim();
+    if (term.isEmpty || syncing) return 0;
+    syncing = true;
+    _cancel = false;
+    status = '联网搜索“$term”…';
+    notifyListeners();
+    var found = 0;
+    try {
+      final cts = cat.isEmpty ? kCategories.keys.toList() : [cat];
+      outer:
+      for (final ct in cts) {
+        var page = 0;
+        var total = 1;
+        while (page < total) {
+          if (_cancel) break outer;
+          final r = await _fetchPage(ct, page, word: term);
+          total = r.pages;
+          for (final p in r.items) {
+            final ex = products[p.code];
+            if (ex == null) {
+              products[p.code] = p;
+              p.addTag(term);
+            } else {
+              ex.addTag(term);
+            }
+            found++;
+          }
+          status = '联网搜索“$term” · ${kCategories[ct]} ${page + 1}/${total < 1 ? 1 : total}';
+          notifyListeners();
+          page++;
+          if (!(page >= total && ct == cts.last)) {
+            await Future.delayed(const Duration(milliseconds: 1000));
+          }
+        }
+      }
+      status = _cancel ? '已取消联网搜索' : '联网搜索完成：“$term” 共 $found 件';
+    } catch (e) {
+      status = '联网搜索失败：$e';
+    } finally {
+      syncing = false;
+      _index();
+      await _save();
+      notifyListeners();
+    }
+    return found;
   }
 
   List<Product> query(String q, String cat) {

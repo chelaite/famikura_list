@@ -176,54 +176,87 @@ class _ShopPageState extends State<ShopPage> {
   }
 
   Future<void> _openSync() async {
-    List<String> names;
+    List<Artist> artists;
     try {
-      names = await catalog.fetchArtistNames();
-    } catch (_) {
-      names = [];
+      artists = await catalog.fetchArtists();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('获取团体列表失败：$e')));
+      }
+      return;
     }
     if (!mounted) return;
-    final all = <String>{...names, ...catalog.tags}.toList();
-    final sel = <String>{...catalog.tags};
+    final sel = <String>{};
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('选择要同步的团体'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 360,
-            child: ListView(
-              children: [
-                for (final n in all)
-                  CheckboxListTile(
-                    dense: true,
-                    value: sel.contains(n),
-                    title: Text(n),
-                    onChanged: (v) => setS(() {
-                      if (v == true) {
-                        sel.add(n);
-                      } else {
-                        sel.remove(n);
-                      }
-                    }),
-                  ),
-              ],
+        builder: (ctx, setS) {
+          void toggle(String n, bool? v) => setS(() {
+                if (v == true) {
+                  sel.add(n);
+                } else {
+                  sel.remove(n);
+                }
+              });
+          return AlertDialog(
+            title: const Text('选择要同步的团体或个人'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 420,
+              child: ListView(
+                children: [
+                  for (final a in artists)
+                    if (a.members.isEmpty)
+                      CheckboxListTile(
+                        dense: true,
+                        value: sel.contains(a.name),
+                        title: Text(a.name),
+                        onChanged: (v) => toggle(a.name, v),
+                      )
+                    else
+                      ExpansionTile(
+                        tilePadding: const EdgeInsets.only(left: 4, right: 12),
+                        leading: Checkbox(
+                          value: sel.contains(a.name),
+                          onChanged: (v) => toggle(a.name, v),
+                        ),
+                        title: Text(a.name),
+                        subtitle: Text('${a.members.length} 位成员', style: const TextStyle(fontSize: 12)),
+                        children: [
+                          for (final m in a.members)
+                            CheckboxListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.only(left: 40, right: 12),
+                              value: sel.contains(m),
+                              title: Text(m),
+                              onChanged: (v) => toggle(m, v),
+                            ),
+                        ],
+                      ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(
-              onPressed: sel.isEmpty ? null : () => Navigator.pop(ctx, true),
-              child: const Text('开始同步'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+              FilledButton(
+                onPressed: sel.isEmpty ? null : () => Navigator.pop(ctx, true),
+                child: Text(sel.isEmpty ? '开始同步' : '开始同步（${sel.length}）'),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (ok != true) return;
-    catalog.tags = sel.toList();
-    catalog.sync();
+    catalog.sync(sel.toList());
+  }
+
+  Future<void> _online(String v) async {
+    final q = v.trim();
+    if (q.isEmpty || catalog.syncing) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _query = q);
+    await catalog.searchOnline(q, _cat);
   }
 
   Future<void> _openCart() async {
@@ -326,25 +359,38 @@ class _ShopPageState extends State<ShopPage> {
                   ),
                 ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                child: TextField(
-                  controller: _q,
-                  decoration: InputDecoration(
-                    hintText: '搜索商品名或编号，如 435、HSJ26-435、Juliet',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _q.clear();
-                              setState(() => _query = '');
-                            },
-                          ),
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                  ),
-                  onChanged: (v) => setState(() => _query = v),
+                padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _q,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: '搜商品名、编号或标签（回车联网搜索）',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _query.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(Icons.close),
+                                  onPressed: () {
+                                    _q.clear();
+                                    setState(() => _query = '');
+                                  },
+                                ),
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => setState(() => _query = v),
+                        onSubmitted: _online,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '联网搜索（含标签）',
+                      icon: const Icon(Icons.travel_explore),
+                      onPressed: catalog.syncing ? null : () => _online(_q.text),
+                    ),
+                  ],
                 ),
               ),
               SingleChildScrollView(

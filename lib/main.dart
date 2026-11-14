@@ -172,6 +172,19 @@ class _ListsPageState extends State<ListsPage> {
               leading: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(_sel.clear)),
               title: Text('已选 ${_sel.length}'),
               actions: [
+                IconButton(
+                  tooltip: _sel.length == _lists.length ? '取消全选' : '全选',
+                  icon: Icon(_sel.length == _lists.length ? Icons.deselect : Icons.select_all),
+                  onPressed: () => setState(() {
+                    if (_sel.length == _lists.length) {
+                      _sel.clear();
+                    } else {
+                      _sel
+                        ..clear()
+                        ..addAll(_lists.map((e) => e.id));
+                    }
+                  }),
+                ),
                 if (_sel.length >= 2)
                   IconButton(tooltip: '合并', icon: const Icon(Icons.merge_type), onPressed: _merge),
                 IconButton(tooltip: '删除', icon: const Icon(Icons.delete), onPressed: _deleteSel),
