@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dialogs.dart';
@@ -8,6 +9,7 @@ import 'parser.dart';
 import 'store.dart';
 import 'catalog.dart';
 import 'shop_page.dart';
+import 'share_codec.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +72,67 @@ class _ListsPageState extends State<ListsPage> {
       MaterialPageRoute(builder: (_) => ListPage(list: l, onChanged: _save, initialNotes: notes)),
     );
     if (mounted) setState(() {});
+  }
+
+  Future<void> _shareSel() async {
+    final chosen = _lists.where((e) => _sel.contains(e.id)).toList();
+    if (chosen.isEmpty) return;
+    await Share.share(buildShareText(chosen));
+  }
+
+  /// 导入别人分享来的列表：从剪贴板读取，或手动粘贴
+  Future<void> _importShared() async {
+    var clip = '';
+    try {
+      clip = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
+    } catch (_) {}
+    if (!mounted) return;
+    final ctrl = TextEditingController(text: clip.contains('FKLIST1:') ? clip : '');
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导入分享的列表'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: ctrl.text.isEmpty,
+          minLines: 4,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            hintText: '粘贴收到的整条分享消息',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('导入')),
+        ],
+      ),
+    );
+    if (text == null || !mounted) return;
+    final shared = decodeShareText(text);
+    if (shared == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('没有找到有效的列表内容，请复制完整的分享消息')),
+      );
+      return;
+    }
+    setState(() {
+      for (var i = shared.length - 1; i >= 0; i--) {
+        _lists.insert(
+          0,
+          ShopList(
+            id: '${ShopList.newId()}_$i',
+            name: shared[i].name,
+            created: DateTime.now(),
+            items: shared[i].items.map(catalog.enrich).toList(),
+          ),
+        );
+      }
+    });
+    await _save();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${shared.length} 个列表')));
+    if (shared.length == 1) await _open(_lists.first);
   }
 
   Future<void> _openShop() async {
@@ -185,6 +248,7 @@ class _ListsPageState extends State<ListsPage> {
                     }
                   }),
                 ),
+                IconButton(tooltip: '分享', icon: const Icon(Icons.share), onPressed: _shareSel),
                 if (_sel.length >= 2)
                   IconButton(tooltip: '合并', icon: const Icon(Icons.merge_type), onPressed: _merge),
                 IconButton(tooltip: '删除', icon: const Icon(Icons.delete), onPressed: _deleteSel),
@@ -197,6 +261,11 @@ class _ListsPageState extends State<ListsPage> {
                   tooltip: '商品库',
                   icon: const Icon(Icons.storefront),
                   onPressed: _busy ? null : _openShop,
+                ),
+                IconButton(
+                  tooltip: '导入分享的列表',
+                  icon: const Icon(Icons.file_download),
+                  onPressed: _busy ? null : _importShared,
                 ),
                 IconButton(
                   tooltip: '新建列表',
@@ -505,6 +574,11 @@ class _ListPageState extends State<ListPage> {
       appBar: AppBar(
         title: Text(_l.name),
         actions: [
+          IconButton(
+            tooltip: '分享',
+            icon: const Icon(Icons.share),
+            onPressed: _items.isEmpty ? null : () => Share.share(buildShareText([_l])),
+          ),
           IconButton(tooltip: '重命名', icon: const Icon(Icons.edit), onPressed: _rename),
           if (_items.isNotEmpty)
             IconButton(tooltip: '清空', icon: const Icon(Icons.delete_sweep), onPressed: _clearAll),
