@@ -10,6 +10,7 @@ import 'store.dart';
 import 'catalog.dart';
 import 'shop_page.dart';
 import 'share_codec.dart';
+import 'tutorial_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +29,7 @@ class App extends StatelessWidget {
   const App({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: '购物清单',
+        title: 'Famikura List',
         theme: ThemeData(colorSchemeSeed: Colors.pink, useMaterial3: true),
         home: const ListsPage(),
       );
@@ -60,6 +61,15 @@ class _ListsPageState extends State<ListsPage> {
         _loading = false;
       });
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeTutorial());
+  }
+
+  /// 第一次启动时自动显示教程（只显示一次，之后可从右上角菜单重新打开）
+  Future<void> _maybeTutorial() async {
+    if (await tutorialSeen()) return;
+    await markTutorialSeen();
+    if (!mounted) return;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialPage()));
   }
 
   Future<void> _save() => Store.save(_lists);
@@ -272,6 +282,20 @@ class _ListsPageState extends State<ListsPage> {
                   icon: const Icon(Icons.add),
                   onPressed: _busy ? null : _create,
                 ),
+                PopupMenuButton<String>(
+                  tooltip: '更多',
+                  onSelected: (v) {
+                    if (v == 'tutorial') {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialPage()));
+                    } else if (v == 'about') {
+                      showAboutAppDialog(context);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'tutorial', child: Text('使用教程')),
+                    PopupMenuItem(value: 'about', child: Text('关于')),
+                  ],
+                ),
               ],
             ),
       floatingActionButton: selecting
@@ -447,6 +471,64 @@ class _ListPageState extends State<ListPage> {
     );
   }
 
+  Future<void> _addMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('手动输入编号'),
+              onTap: () => Navigator.pop(ctx, 'manual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.storefront),
+              title: const Text('从商店添加'),
+              onTap: () => Navigator.pop(ctx, 'shop'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == 'manual') {
+      await _manualAdd();
+    } else if (choice == 'shop') {
+      await _addFromShop();
+    }
+  }
+
+  Future<void> _addFromShop() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ShopPage(addToName: _l.name, onCreate: _addShopItems),
+      ),
+    );
+  }
+
+  /// 商店购物车里的商品加入当前列表：已有的商品数量累加，然后回到列表页
+  Future<void> _addShopItems(String name, List<Item> items) async {
+    var added = 0, merged = 0;
+    _mut(() {
+      for (final it in items) {
+        final i = _items.indexWhere((e) => e.key == it.key);
+        if (i < 0) {
+          _items.add(it);
+          added++;
+        } else {
+          _items[i].qty = _cq(_items[i].qty + it.qty);
+          merged++;
+        }
+      }
+    });
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    Navigator.of(context).popUntil((r) => r == route);
+    _toast('已加入 $added 种${merged > 0 ? '，另有 $merged 种已在清单里，数量已累加' : ''}');
+  }
+
   Future<void> _manualAdd() async {
     final r = await _editDialog();
     if (r == null) return;
@@ -597,9 +679,9 @@ class _ListPageState extends State<ListPage> {
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
-              onPressed: _busy ? null : _manualAdd,
+              onPressed: _busy ? null : _addMenu,
               icon: const Icon(Icons.add),
-              label: const Text('手动加'),
+              label: const Text('添加'),
             ),
           ]),
           if (_busy) ...[

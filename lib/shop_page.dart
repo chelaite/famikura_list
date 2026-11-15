@@ -159,7 +159,9 @@ Future<void> showProductDialog(BuildContext context, Product p, {bool showAdd = 
 
 class ShopPage extends StatefulWidget {
   final CreateListFn onCreate;
-  const ShopPage({super.key, required this.onCreate});
+  /// 不为空时表示"往已有列表里添加"：购物车按钮变成"加入该列表"，不再询问新列表名称
+  final String? addToName;
+  const ShopPage({super.key, required this.onCreate, this.addToName});
   @override
   State<ShopPage> createState() => _ShopPageState();
 }
@@ -262,7 +264,9 @@ class _ShopPageState extends State<ShopPage> {
   Future<void> _openCart() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => CartPage(onCreate: widget.onCreate)),
+      MaterialPageRoute(
+        builder: (_) => CartPage(onCreate: widget.onCreate, addToName: widget.addToName),
+      ),
     );
   }
 
@@ -324,7 +328,7 @@ class _ShopPageState extends State<ShopPage> {
         final items = catalog.query(_query, _cat);
         return Scaffold(
           appBar: AppBar(
-            title: const Text('商品库'),
+            title: Text(widget.addToName == null ? '商品库' : '从商店添加'),
             actions: [
               IconButton(
                 tooltip: '更新商品库',
@@ -480,7 +484,8 @@ class _ShopPageState extends State<ShopPage> {
 
 class CartPage extends StatelessWidget {
   final CreateListFn onCreate;
-  const CartPage({super.key, required this.onCreate});
+  final String? addToName;
+  const CartPage({super.key, required this.onCreate, this.addToName});
 
   static String _defaultName() {
     final n = DateTime.now();
@@ -489,7 +494,8 @@ class CartPage extends StatelessWidget {
   }
 
   Future<void> _make(BuildContext context) async {
-    final name = await askText(context, title: '给新清单命名', initial: _defaultName(), hint: '列表名称');
+    final name = addToName ??
+        await askText(context, title: '给新清单命名', initial: _defaultName(), hint: '列表名称');
     if (name == null) return;
     final items = <Item>[];
     for (final e in cart.qty.entries) {
@@ -575,7 +581,9 @@ class CartPage extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: () => _make(context),
                       icon: const Icon(Icons.playlist_add_check),
-                      label: Text('生成清单（${cart.kinds} 种 / ${cart.total} 件）'),
+                      label: Text(addToName == null
+                          ? '生成清单（${cart.kinds} 种 / ${cart.total} 件）'
+                          : '加入「$addToName」（${cart.kinds} 种 / ${cart.total} 件）'),
                     ),
                   ),
                 ),
